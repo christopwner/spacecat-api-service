@@ -167,7 +167,7 @@ describe('Suggestions Controller', () => {
   let mockSite;
   let mockConfiguration;
   let suggestionsController;
-  let mockSqs;
+  let mockSns;
   let opportunity;
   let site;
   let siteNotEnabled;
@@ -451,15 +451,15 @@ describe('Suggestions Controller', () => {
       Site: mockSite,
       Configuration: mockConfiguration,
     };
-    mockSqs = {
-      sendMessage: sandbox.stub().resolves(),
+    mockSns = {
+      publish: sandbox.stub().resolves(),
     };
 
     suggestionsController = SuggestionsController({
       dataAccess: mockSuggestionDataAccess,
       pathInfo: { headers: { 'x-product': 'llmo' } },
       ...authContext,
-    }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+    }, mockSns, { AUTOFIX_JOBS_TOPIC_ARN: 'arn:aws:sns:us-east-1:123456789012:spacecat-autofix-jobs' });
   });
 
   afterEach(() => {
@@ -2567,7 +2567,7 @@ describe('Suggestions Controller', () => {
         dataAccess: mockSuggestionDataAccess,
         pathInfo: { headers: { 'x-product': 'abcd' } },
         ...authContext,
-      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+      }, mockSns, { AUTOFIX_JOBS_TOPIC_ARN: 'arn:aws:sns:us-east-1:123456789012:spacecat-autofix-jobs' });
     });
 
     afterEach(() => {
@@ -2674,8 +2674,8 @@ describe('Suggestions Controller', () => {
       expect(mockSuggestion.bulkUpdateStatus).to.not.have.been.called;
 
       // alt-text is grouped by URL, so 2 suggestions with different URLs = 2 SQS calls
-      expect(mockSqs.sendMessage).to.have.been.calledTwice;
-      const allSqsCalls = mockSqs.sendMessage.getCalls();
+      expect(mockSns.publish).to.have.been.calledTwice;
+      const allSqsCalls = mockSns.publish.getCalls();
       allSqsCalls.forEach((call) => {
         expect(call.args[1]).to.have.property('action', 'assess');
         expect(call.args[1]).to.have.property('siteId', SITE_ID);
@@ -2718,7 +2718,7 @@ describe('Suggestions Controller', () => {
       expect(bulkPatchResponse.suggestions[0].suggestion).to.have.property('status', 'IN_PROGRESS');
       expect(bulkPatchResponse.suggestions[1].suggestion).to.have.property('status', 'IN_PROGRESS');
       // Verify SQS was called once (non-grouped behavior)
-      expect(mockSqs.sendMessage).to.have.been.calledOnce;
+      expect(mockSns.publish).to.have.been.calledOnce;
     });
 
     it('triggers autofixSuggestion for form-accessibility with multiple suggestions from same URL', async () => {
@@ -2754,7 +2754,7 @@ describe('Suggestions Controller', () => {
       const bulkPatchResponse = await response.json();
       expect(bulkPatchResponse.metadata).to.have.property('success', 2);
       // Verify SQS was called once with all suggestions, not grouped by URL
-      expect(mockSqs.sendMessage).to.have.been.calledOnce;
+      expect(mockSns.publish).to.have.been.calledOnce;
     });
 
     it('triggers autofixSuggestion for product-metatags (non-grouped)', async () => {
@@ -2813,7 +2813,7 @@ describe('Suggestions Controller', () => {
       expect(bulkPatchResponse.suggestions[0].suggestion).to.have.property('status', 'IN_PROGRESS');
       expect(bulkPatchResponse.suggestions[1].suggestion).to.have.property('status', 'IN_PROGRESS');
       // Verify SQS was called once (non-grouped behavior)
-      expect(mockSqs.sendMessage).to.have.been.calledOnce;
+      expect(mockSns.publish).to.have.been.calledOnce;
     });
 
     it('triggers autofixSuggestion with customData for non-grouped type', async () => {
@@ -2848,8 +2848,8 @@ describe('Suggestions Controller', () => {
       expect(bulkPatchResponse.metadata).to.have.property('success', 2);
 
       // Verify sendAutofixMessage was called with customData
-      expect(mockSqs.sendMessage).to.have.been.calledOnce;
-      const sqsCallArgs = mockSqs.sendMessage.firstCall.args;
+      expect(mockSns.publish).to.have.been.calledOnce;
+      const sqsCallArgs = mockSns.publish.firstCall.args;
       expect(sqsCallArgs[1]).to.have.property('customData');
       expect(sqsCallArgs[1].customData).to.deep.equal(customData);
     });
@@ -2880,8 +2880,8 @@ describe('Suggestions Controller', () => {
       expect(bulkPatchResponse.metadata).to.have.property('success', 1);
 
       // Verify sendAutofixMessage was called without customData (undefined)
-      expect(mockSqs.sendMessage).to.have.been.calledOnce;
-      const sqsCallArgs = mockSqs.sendMessage.firstCall.args;
+      expect(mockSns.publish).to.have.been.calledOnce;
+      const sqsCallArgs = mockSns.publish.firstCall.args;
       expect(sqsCallArgs[1]).to.not.have.property('customData');
     });
 
@@ -2921,8 +2921,8 @@ describe('Suggestions Controller', () => {
       expect(bulkPatchResponse.metadata).to.have.property('success', 1);
 
       // Verify sendAutofixMessage was called with empty customData object
-      expect(mockSqs.sendMessage).to.have.been.calledOnce;
-      const sqsCallArgs = mockSqs.sendMessage.firstCall.args;
+      expect(mockSns.publish).to.have.been.calledOnce;
+      const sqsCallArgs = mockSns.publish.firstCall.args;
       expect(sqsCallArgs[1]).to.have.property('customData');
       expect(sqsCallArgs[1].customData).to.deep.equal({});
     });
@@ -3124,18 +3124,18 @@ describe('Suggestions Controller', () => {
 
   describe('auto-fix suggestions for CS', function () {
     this.timeout(10000);
-    let spySqs;
-    let sqsSpy;
+    let spySns;
+    let snsSpy;
     let imsPromiseClient;
     let suggestionsControllerWithIms;
 
     beforeEach(async () => {
       site.getDeliveryType = sandbox.stub().returns(SiteModel.DELIVERY_TYPES.AEM_CS);
 
-      sqsSpy = sandbox.spy();
+      snsSpy = sandbox.spy();
 
-      spySqs = {
-        sendMessage: sqsSpy,
+      spySns = {
+        publish: snsSpy,
       };
 
       imsPromiseClient = {
@@ -3159,7 +3159,7 @@ describe('Suggestions Controller', () => {
         dataAccess: mockSuggestionDataAccess,
         pathInfo: { headers: { 'x-product': 'abcd' } },
         ...authContext,
-      }, spySqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+      }, spySns, { AUTOFIX_JOBS_TOPIC_ARN: 'arn:aws:sns:us-east-1:123456789012:spacecat-autofix-jobs' });
     });
 
     it('triggers autofixSuggestion and sets suggestions to in-progress for CS', async () => {
@@ -3188,8 +3188,8 @@ describe('Suggestions Controller', () => {
       });
 
       expect(response.status).to.equal(207);
-      expect(sqsSpy.firstCall.args[1]).to.have.property('promiseToken');
-      expect(sqsSpy.firstCall.args[1].promiseToken).to.have.property('promise_token');
+      expect(snsSpy.firstCall.args[1]).to.have.property('promiseToken');
+      expect(snsSpy.firstCall.args[1].promiseToken).to.have.property('promise_token');
 
       const bulkPatchResponse = await response.json();
       expect(bulkPatchResponse).to.have.property('suggestions');
@@ -3230,8 +3230,8 @@ describe('Suggestions Controller', () => {
       });
 
       expect(response.status).to.equal(207);
-      expect(sqsSpy.firstCall.args[1]).to.have.property('promiseToken');
-      expect(sqsSpy.firstCall.args[1].promiseToken).to.have.property('promise_token', 'promiseTokenExample');
+      expect(snsSpy.firstCall.args[1]).to.have.property('promiseToken');
+      expect(snsSpy.firstCall.args[1].promiseToken).to.have.property('promise_token', 'promiseTokenExample');
     });
 
     it('auto-fix suggestions returns 400 without authorization header', async () => {
@@ -3272,7 +3272,7 @@ describe('Suggestions Controller', () => {
         dataAccess: mockSuggestionDataAccess,
         pathInfo: { headers: { 'x-product': 'abcd' } },
         ...authContext,
-      }, spySqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+      }, spySns, { AUTOFIX_JOBS_TOPIC_ARN: 'arn:aws:sns:us-east-1:123456789012:spacecat-autofix-jobs' });
       mockSuggestion.allByOpportunityId.resolves(
         [mockSuggestionEntity(suggs[0]),
           mockSuggestionEntity(suggs[2]),
@@ -3487,7 +3487,7 @@ describe('Suggestions Controller', () => {
         dataAccess: mockSuggestionDataAccess,
         pathInfo: { headers: { 'x-product': 'abcd' } },
         ...authContext,
-      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+      }, mockSns, { AUTOFIX_JOBS_TOPIC_ARN: 'arn:aws:sns:us-east-1:123456789012:spacecat-autofix-jobs' });
     });
 
     afterEach(() => {
@@ -4117,7 +4117,7 @@ describe('Suggestions Controller', () => {
         },
         pathInfo: { headers: { 'x-product': 'llmo' } },
         ...authContext,
-      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+      }, mockSns, { AUTOFIX_JOBS_TOPIC_ARN: 'arn:aws:sns:us-east-1:123456789012:spacecat-autofix-jobs' });
       // Make S3 fetchMetaconfig fail so deployment throws and controller returns 207 with failed: 1, 500
       const originalSend = context.s3.s3Client.send;
       context.s3.s3Client.send = sandbox.stub().callsFake((cmd) => {
@@ -6855,7 +6855,7 @@ describe('Suggestions Controller', () => {
         dataAccess: mockSuggestionDataAccess,
         pathInfo: { headers: { 'x-product': 'abcd' } },
         ...authContext,
-      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+      }, mockSns, { AUTOFIX_JOBS_TOPIC_ARN: 'arn:aws:sns:us-east-1:123456789012:spacecat-autofix-jobs' });
     });
 
     afterEach(() => {

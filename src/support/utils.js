@@ -202,7 +202,7 @@ export const triggerTrafficAnalysisBackfill = async (
 
 export const sendAutofixMessage = async (
   sns,
-  topicName,
+  topicArn,
   siteId,
   opportunityId,
   opportunityType,
@@ -212,7 +212,7 @@ export const sendAutofixMessage = async (
   action,
   customData,
   { url } = {},
-) => sns.publish(topicName, {
+) => sns.publish(topicArn, {
   opportunityId,
   opportunityType,
   siteId,

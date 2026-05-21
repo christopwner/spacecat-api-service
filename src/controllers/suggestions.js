@@ -920,13 +920,13 @@ function SuggestionsController(ctx, sns, env) {
       },
     };
     response.suggestions.sort((a, b) => a.index - b.index);
-    const { AUTOFIX_JOBS_TOPIC_NAME: topicName } = env;
+    const { AUTOFIX_JOBS_TOPIC_ARN: topicArn } = env;
 
     if (shouldGroupSuggestionsForAutofix(opportunity.getType())) {
       await Promise.all(
         suggestionGroups.map(({ groupedSuggestions, url }) => sendAutofixMessage(
           sns,
-          topicName,
+          topicArn,
           siteId,
           opportunityId,
           opportunity.getType(),
@@ -941,7 +941,7 @@ function SuggestionsController(ctx, sns, env) {
     } else {
       await sendAutofixMessage(
         sns,
-        topicName,
+        topicArn,
         siteId,
         opportunityId,
         opportunity.getType(),
